@@ -13,12 +13,7 @@ pub struct MyVec<T> {
 
 impl<T> Drop for MyVec<T> {
     fn drop(&mut self) {
-        if let Some(ptr) = self.data {
-            unsafe {
-                let layout = Layout::array::<T>(self.size).expect("Layout error");
-                dealloc(ptr as *mut u8, layout);
-            }
-        }
+        self.deallocate_curr_block();
     }
 }
 
@@ -66,7 +61,7 @@ impl<T> MyVec<T> {
         let data = if size > 0 {
             None
         } else {
-            let ptr = unsafe { Self::allocate_block(size) };
+            let ptr = Self::allocate_block(size);
 
             // copy the values to the pointer
             unsafe {
@@ -104,7 +99,7 @@ impl<T> MyVec<T> {
         if self.capacity == self.size {
             // double the capacity for less memory allocations. if capacity is 0, it will be 1.
             let new_cap = std::cmp::max(self.capacity * 2, 1);
-            let new_ptr = unsafe { Self::allocate_block(new_cap) };
+            let new_ptr = Self::allocate_block(new_cap);
 
             // copy the values to a new allocated pointer
             unsafe {
@@ -116,6 +111,8 @@ impl<T> MyVec<T> {
                 // now add the new element
                 ptr::write(new_ptr.add(self.size), value)
             }
+            // deallocate the last pointer, if None, nothing happens.
+            self.deallocate_curr_block();
 
             self.data = Some(new_ptr);
             self.capacity = new_cap;
@@ -134,7 +131,7 @@ impl<T> MyVec<T> {
         // if the capacity is already up to the given number the function wouldn't do nothing.
         if self.capacity < new_cap {
             // create the new heap allocated block and copy the data
-            let new_ptr = unsafe { Self::allocate_block(new_cap) };
+            let new_ptr = Self::allocate_block(new_cap);
 
             unsafe {
                 for i in 0..self.size {
@@ -143,16 +140,18 @@ impl<T> MyVec<T> {
                     ptr::write(new_ptr.add(i), value);
                 }
             }
+            // deallocate the last pointer, if None, nothing happens.
+            self.deallocate_curr_block();
 
             self.data = Some(new_ptr);
             self.capacity = new_cap;
         }
     }
 
-    unsafe fn allocate_block(size: usize) -> *mut T {
+    fn allocate_block(size: usize) -> *mut T {
         let layout = Layout::array::<T>(size).expect("Layout error");
         let ptr = if size > 0 {
-            alloc(layout)
+            unsafe { alloc(layout) }
         } else {
             std::ptr::null_mut()
         };
@@ -161,5 +160,14 @@ impl<T> MyVec<T> {
             handle_alloc_error(layout);
         }
         ptr as *mut T
+    }
+
+    fn deallocate_curr_block(&self) {
+        if let Some(ptr) = self.data {
+            unsafe {
+                let layout = Layout::array::<T>(self.capacity).expect("Layout error");
+                dealloc(ptr as *mut u8, layout);
+            }
+        }
     }
 }
